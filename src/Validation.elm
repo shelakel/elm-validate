@@ -3,7 +3,7 @@ module Validation
   , isNotEmpty, notEmpty
   , isStringLengthBetween, stringLengthBetween
   , isValidEmail, email
-  , syncValidate, asyncValidate, validate
+  , syncValidate, asyncValidate, validate, combine
   ) where
 
 {-| Validation library for elm supporting sync and async validation with state.
@@ -14,7 +14,7 @@ module Validation
 # Validators
 @docs notEmpty, stringLengthBetween, email, syncValidate, asyncValidate
 # Validation
-@docs validate
+@docs validate, combine
 -}
 
 import Task exposing (Task)
