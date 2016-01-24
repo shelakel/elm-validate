@@ -5,9 +5,9 @@
  1. [Install elm if you haven't](http://elm-lang.org/install)
  2. Clone the repository: `git clone https://github.com/shelakel/elm-validate.git`
  3. `cd elm-validate`
- 4. Install the dependencies for the main package: elm make
+ 4. Install the dependencies for the main package: `elm make`
  5. `cd examples`
- 6. Install the dependencies for the examples: elm make
+ 6. Install the dependencies for the examples: `elm make`
  7. Run elm reactor: `elm reactor -a=localhost`
  8. Open up [localhost:8000] (http://localhost:8000/) to run examples
 
