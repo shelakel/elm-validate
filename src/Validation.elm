@@ -70,7 +70,7 @@ isValidEmail = Regex.contains reEmail
 -}
 email :
     String -> (model -> String) -> (model -> State state) -> (model -> State state)
-email = regex reEmail
+email = syncValidate (\value -> String.isEmpty value || (Regex.contains reEmail) value)
 
 {-| regex validates that the given String value matches the Regex.
 -}
