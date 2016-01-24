@@ -1,0 +1,17 @@
+{
+    "version": "1.0.0",
+    "summary": "Validation library for elm supporting sync and async validation with state",
+    "repository": "https://github.com/shelakel/elm-validate.git",
+    "license": "MIT",
+    "source-directories": [
+        "src"
+    ],
+    "exposed-modules": [
+      "Validation"
+    ],
+    "dependencies": {
+        "elm-lang/core": "3.0.0 <= v < 4.0.0",
+        "evancz/elm-effects": "2.0.1 <= v < 3.0.0"
+    },
+    "elm-version": "0.16.0 <= v < 0.17.0"
+}
