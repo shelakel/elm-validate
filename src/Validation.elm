@@ -3,7 +3,9 @@ module Validation
   , isNotEmpty, notEmpty
   , isStringLengthBetween, stringLengthBetween
   , isValidEmail, email
-  , syncValidate, asyncValidate, validate, combine
+  , syncValidate, asyncValidate, combine
+  , isValid, isInvalid, isValidModel, isInvalidModel, listModelErrors
+  , validate
   ) where
 
 {-| Validation library for elm supporting sync and async validation with state.
@@ -15,6 +17,8 @@ module Validation
 @docs notEmpty, stringLengthBetween, email, syncValidate, asyncValidate
 # Validation
 @docs validate, combine
+# Validation helpers
+@docs isValid, isInvalid, isValidModel, isInvalidModel, listModelErrors
 -}
 
 import Task exposing (Task)
@@ -79,6 +83,43 @@ regex : Regex.Regex ->
 regex re = syncValidate (Regex.contains re)
 
 -- validation helpers
+
+{-| isValid tests if the validation state has no error.
+-}
+isValid : { error : Maybe String } -> Bool
+isValid state = state.error == Nothing
+
+{-| isValidModel, given a model, tests if all the validation states are valid.
+-}
+isValidModel : List (model -> { error : Maybe String }) -> model -> Bool
+isValidModel states =
+  \model ->
+    List.all (\state -> state.error == Nothing) <|
+      List.map (\getState -> getState model) states
+
+{-| isInvalid tests if the validation state has an error.
+-}
+isInvalid : { error : Maybe String } -> Bool
+isInvalid state = not <| isValid state
+
+{-| isInvalidModel, given a model, tests if any validation states are invalid.
+-}
+isInvalidModel : List (model -> { error : Maybe String }) -> model -> Bool
+isInvalidModel states model = not <| isValidModel states model
+
+{-| listModelErrors, given a model, extracts a list of errors for invalid validation states.
+-}
+listModelErrors : List (model -> { error : Maybe String}) -> model -> Maybe (List String)
+listModelErrors states model =
+  let
+    errors =
+      List.filterMap
+      (\state -> state.error)
+      (List.map (\getState -> getState model) states)
+  in
+    if List.length errors > 0
+      then Just errors
+      else Nothing
 
 {-| syncValidate creates a new synchronous validation function
 given a validation function (value -> Bool) for use in validate.
