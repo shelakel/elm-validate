@@ -118,7 +118,7 @@ update action model =
     SetValidationState transform ->
       transform model
     Submit ->
-      (model, Effects.none)
+      validateModel model -- todo: chain to Effects to execute on validated
     NoOp ->
       (model, Effects.none)
 
