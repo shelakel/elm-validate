@@ -164,3 +164,20 @@ validate setStateAction getValue getState setState syncValidators asyncValidator
             )
         else
           (model', Effects.none)
+
+{-| combine combines one or more validation functions.
+-}
+combine : List (model -> (model, Effects action))
+             -> (model -> (model, Effects action))
+combine validators =
+  \model ->
+    List.foldl
+    (\validator (model', action) ->
+      let (newModel, newAction) = validator model'
+      in (newModel, Effects.batch [action, newAction])
+    )
+    (model |> Maybe.withDefault
+      (\model' -> (model', Effects.none))
+      (List.head validators)
+    )
+    (Maybe.withDefault [] (List.tail validators))
