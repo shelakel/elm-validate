@@ -104,13 +104,13 @@ asyncValidate validate' =
 {-| validate validates a model with synchronous and asynchronous validation
 functions.
 
+Asynchronous validation is done on the value at the point of validation and
+a single effect (update validation state) is returned for chained validations.
+
 The value is first validated using chained synchronous validation functions (first failure returned),
 thereafter if the value is valid, asynchronous validation functions are chained (first failure returned).
 
 validate produces an effect for asynchronous validation to update validation state.
-
-Asynchronous validation is done on the value at the point of validation and
-a single effect (update validation state) is returned for chained validations.
 -}
 validate : ((model -> model) -> action) -- set validation state action
         -> (model -> value) -- get value
