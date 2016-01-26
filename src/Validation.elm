@@ -3,9 +3,9 @@ module Validation
   , isNotEmpty, notEmpty
   , isStringLengthBetween, stringLengthBetween
   , isValidEmail, email
-  , syncValidate, asyncValidate, combine
+  , syncValidate, asyncValidate
   , isValid, isInvalid, isValidModel, isInvalidModel, listModelErrors
-  , validate
+  , combine, validate, toEffects
   ) where
 
 {-| Validation library for elm supporting sync and async validation with state.
@@ -16,9 +16,9 @@ module Validation
 # Validators
 @docs notEmpty, stringLengthBetween, email, syncValidate, asyncValidate
 # Validation
-@docs validate, combine
+@docs combine, validate
 # Validation helpers
-@docs isValid, isInvalid, isValidModel, isInvalidModel, listModelErrors
+@docs isValid, isInvalid, isValidModel, isInvalidModel, listModelErrors, toEffects
 -}
 
 import Task exposing (Task)
@@ -150,17 +150,15 @@ a single effect (update validation state) is returned for chained validations.
 
 The value is first validated using chained synchronous validation functions (first failure returned),
 thereafter if the value is valid, asynchronous validation functions are chained (first failure returned).
-
-validate produces an effect for asynchronous validation to update validation state.
 -}
-validate : ((model -> model) -> action) -- set validation state action
-        -> (model -> value) -- get value
-        -> (model -> State state) -- get state
-        -> (State state -> model -> model) -- set state
-        -> List ((model -> value) -> (model -> State state) -> (model -> State state)) -- validate sync
-        -> List ((model -> value) -> (model -> State state) -> (model -> Task Never (State state))) -- validate async
-        -> (model -> (model, Effects action))
-validate setStateAction getValue getState setState syncValidators asyncValidators =
+validate :
+     (model -> value) -- get value
+  -> (model -> State state) -- get state
+  -> (State state -> model -> model) -- set state
+  -> List ((model -> value) -> (model -> State state) -> (model -> State state)) -- validate sync
+  -> List ((model -> value) -> (model -> State state) -> (model -> Task Never (State state))) -- validate async
+  -> (model -> (model, Maybe (Task Never (model -> model))))
+validate getValue getState setState syncValidators asyncValidators =
   \model ->
     let
       prepareValidator = List.map (\fn -> fn getValue getState)
@@ -200,25 +198,64 @@ validate setStateAction getValue getState setState syncValidators asyncValidator
               (Maybe.withDefault [] (List.tail validateAsync))
           in
             ( model'
-            , validateAsync' model' |> Effects.task |> Effects.map
-              (\newState -> setStateAction <| setState newState)
+            , Just <| Task.map setState <| validateAsync' model'
             )
         else
-          (model', Effects.none)
+          (model', Nothing)
 
-{-| combine combines one or more validation functions.
+{-| combine combines one or more validation functions and runs
+async validations in sequence.
 -}
-combine : List (model -> (model, Effects action))
-             -> (model -> (model, Effects action))
+combine :
+     List ((model -> (model, Maybe (Task Never (model -> model)))))
+  -> (model -> (model, Maybe (Task Never (model -> model))))
 combine validators =
-  \model ->
-    List.foldl
-    (\validator (model', action) ->
-      let (newModel, newAction) = validator model'
-      in (newModel, Effects.batch [action, newAction])
-    )
-    (model |> Maybe.withDefault
-      (\model' -> (model', Effects.none))
-      (List.head validators)
-    )
-    (Maybe.withDefault [] (List.tail validators))
+  \model' ->
+    let
+      (model, tasks) =
+        List.foldl
+        (\validate (model, tasks) ->
+          let
+            (newModel, newTask) = validate model
+          in
+            ( newModel
+            , case newTask of
+              Just task -> task :: tasks
+              Nothing -> tasks
+            )
+        )
+        (model', [])
+        validators
+    in
+      if List.length tasks == 0
+        then
+          ( model, Nothing )
+        else
+          ( model
+          , Just <|
+            (Task.sequence tasks)
+            `Task.andThen`
+            \tasks' ->
+              Task.succeed <|
+                \model' -> -- transform the model
+                  List.foldr
+                  (\t m -> t m)
+                  model'
+                  tasks'
+          )
+
+{-| toEffects transforms a validation result to a (model, Effects action),
+mapping the model transform to an action.
+-}
+toEffects :
+     ((model -> model) -> action)
+  -> (model, Maybe (Task Never (model -> model)))
+  -> (model, Effects action)
+toEffects transformAction (model, maybeTask) =
+  ( model
+  , case maybeTask of
+      Just task ->
+        Task.map transformAction task |> Effects.task
+      Nothing ->
+        Effects.none
+  )

@@ -11,14 +11,12 @@ import String
 import Random
 import StartApp
 
--- curry Validation.validate to capture set validation state action
-validate = Validation.validate (\transform -> SetValidationState (\model -> (transform model, Effects.none)))
-
 type alias Model =
   { email : String
   , emailState : Validation.State {}
   , username : String
   , usernameState : Validation.State { seed : Random.Seed }
+  , message : Maybe String
   , state : Validation.State {}
   }
 
@@ -26,8 +24,9 @@ type Action
   = NoOp
   | SetEmail String
   | SetUsername String
-  | Submit
-  | SetValidationState (Model -> (Model, Effects Action))
+  | BeginSubmit
+  | EndSubmit (Model -> Model)
+  | SetValidationState (Model -> Model)
 
 init : (Model, Effects Action)
 init =
@@ -36,9 +35,63 @@ init =
   , emailState = { error = Nothing }
   , username = ""
   , usernameState = { seed = Random.initialSeed 0, error = Nothing }
+  , message = Nothing
   , state = { error = Nothing }
   }
   Effects.none
+
+validateEmail : (Model -> (Model, Maybe (Task Never (Model -> Model))))
+validateEmail =
+  Validation.validate
+  .email .emailState (\state model -> {model | emailState = state })
+  [ Validation.email " is invalid" ] -- sync validation
+  []
+
+-- todo: implement throttling
+checkUsernameExists =
+  Validation.asyncValidate <|
+  \oldState value ->
+    let
+      latencyRng = Random.float 25 250 -- simulate latency delay
+      (latency, newSeed) = Random.generate latencyRng oldState.seed
+    in
+      Task.andThen (Task.sleep latency) <|
+        \_ ->
+          Task.succeed
+          { oldState
+          | seed = newSeed
+          , error =
+              if ((not (String.isEmpty value)) && value /= "test")
+                then Just (" \"" ++ value ++ "\" is not registered. " ++ (toString latency))
+                else Nothing
+          }
+
+validateUsername : (Model -> (Model, Maybe (Task Never (Model -> Model))))
+validateUsername =
+  Validation.validate
+  .username .usernameState (\state model -> {model | usernameState = state })
+  []
+  [ checkUsernameExists ] -- async validation
+
+validateUsernameOrEmail : (Model -> (Model, Maybe (Task Never (Model -> Model))))
+validateUsernameOrEmail =
+  Validation.validate
+  (\model -> (model.username, model.email))
+  .state
+  (\state model -> { model | state = state })
+  [ Validation.syncValidate
+    (\(username, email) -> not ((String.isEmpty username) && (String.isEmpty email)))
+    "Please enter your email or username."
+  ]
+  []
+
+validateModel : (Model -> (Model, Maybe (Task Never (Model -> Model))))
+validateModel =
+  Validation.combine <|
+  [ validateEmail
+  , validateUsername
+  , validateUsernameOrEmail
+  ]
 
 modelValidationStates : List (Model -> { error : Maybe String })
 modelValidationStates =
@@ -53,55 +106,6 @@ isValidModel = Validation.isValidModel modelValidationStates
 isInvalidModel : Model -> Bool
 isInvalidModel = Validation.isInvalidModel modelValidationStates
 
-validateUsernameOrEmail =
-  validate
-  (\model -> (model.username, model.email))
-  .state
-  (\state model -> { model | state = state })
-  [ Validation.syncValidate
-    (\(username, email) -> not ((String.isEmpty username) && (String.isEmpty email)))
-    "Please enter your email or username."
-  ]
-  []
-
-validateModel : (Model -> (Model, Effects Action))
-validateModel =
-  Validation.combine <|
-  [ validateEmail
-  , validateUsername
-  , validateUsernameOrEmail
-  ]
-
-validateEmail =
-  validate .email .emailState (\state model -> {model | emailState = state })
-  [ Validation.email " is invalid" ] -- sync validation
-  []
-
--- todo: implement throttling
-checkUsernameExists =
-  Validation.asyncValidate <|
-  \oldState value ->
-    -- simulate latency delay
-    let
-      latencyRng = Random.float 25 250
-      (latency, newSeed) = Random.generate latencyRng oldState.seed
-    in
-      Task.andThen (Task.sleep latency) <|
-        \_ ->
-          Task.succeed
-          { oldState
-          | seed = newSeed
-          , error =
-              if ((not (String.isEmpty value)) && value /= "test")
-                then Just (" \"" ++ value ++ "\" is not registered. " ++ (toString latency))
-                else Nothing
-          }
-
-validateUsername =
-  validate .username .usernameState (\state model -> {model | usernameState = state })
-  []
-  [ checkUsernameExists ] -- async validation
-
 update : Action -> Model -> (Model, Effects Action)
 update action model =
   case action of
@@ -110,21 +114,33 @@ update action model =
       [ validateEmail
       , validateUsernameOrEmail
       ] {model | email = value}
+      |> Validation.toEffects SetValidationState
     SetUsername value ->
       Validation.combine
       [ validateUsername
       , validateUsernameOrEmail
       ] {model | username = value}
-    SetValidationState transform ->
-      transform model
-    Submit ->
-      validateModel model -- todo: chain to Effects to execute on validated
+      |> Validation.toEffects SetValidationState
+    BeginSubmit ->
+      validateModel model
+      |> Validation.toEffects EndSubmit
+    EndSubmit setValidateState ->
+      let
+        newModel = setValidateState model
+      in
+        if isValidModel newModel
+          then
+            ({ newModel | message = Just "Submit: Valid" }, Effects.none)
+          else
+            ({ newModel | message = Just "Submit: Invalid" }, Effects.none)
+    SetValidationState setValidateState ->
+      (setValidateState model, Effects.none)
     NoOp ->
       (model, Effects.none)
 
-onChangeEvent : (Validation.State state) -> String
-onChangeEvent state =
-  if state.error == Nothing
+onChangeEvent : List (Maybe String) -> String
+onChangeEvent errors =
+  if List.all (\error -> error == Nothing) errors
     then "blur"
     else "input"
 
@@ -142,7 +158,7 @@ view address model =
       , autofocus True
       , placeholder "Enter your email address"
       , value model.email
-      , on (onChangeEvent model.emailState) targetValue (Signal.message address << SetEmail)
+      , on (onChangeEvent [model.emailState.error, model.state.error]) targetValue (Signal.message address << SetEmail)
       ] []
     ]
   , div [ style [("margin-bottom","0.5em")]] [ text "or" ]
@@ -153,17 +169,18 @@ view address model =
       [ type' "text"
       , placeholder "Enter your username"
       , value model.username
-      , on (onChangeEvent model.usernameState) targetValue (Signal.message address << SetUsername)
+      , on (onChangeEvent [model.usernameState.error, model.state.error]) targetValue (Signal.message address << SetUsername)
       ] []
     ]
   , div [ class "field error" ] [ label [] [ text <| Maybe.withDefault "" model.state.error ] ]
   , button
     [ type' "button"
     , class "btn"
-    , disabled <| isInvalidModel model
-    , onClick address Submit
+    , disabled <| model.message /= Nothing && (isInvalidModel model)
+    , onClick address BeginSubmit
     ]
     [ text "Reset password" ]
+  , div [] [ text <| Maybe.withDefault "" model.message ]
   ]
 
 -- start app boilerplate
