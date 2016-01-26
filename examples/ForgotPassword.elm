@@ -2,14 +2,17 @@ module ForgotPassword where
 
 import Validation
 
+import Effects exposing (Effects,Never)
 import Html exposing (..)
 import Html.Attributes exposing (..)
 import Html.Events exposing (..)
-import Effects exposing (Effects,Never)
-import Task exposing (Task)
-import String
-import Random
+import Signal.Time exposing (settledAfter)
 import StartApp
+
+import Random
+import String
+import Task exposing (Task)
+import Time exposing (millisecond)
 
 type alias Model =
   { email : String
@@ -47,7 +50,7 @@ validateEmail =
   [ Validation.email " is invalid" ] -- sync validation
   []
 
--- todo: implement throttling
+-- note: throttling/debounce is done on the setUsernameMailbox.signal
 checkUsernameExists =
   Validation.asyncValidate <|
   \oldState value ->
@@ -155,7 +158,7 @@ view address model =
     [ label [] [ text <| "Email" ++ (Maybe.withDefault "" model.emailState.error) ]
     , input
       [ type' "email"
-      , autofocus True
+      -- , autofocus True -- removed to demonstrate submit validation 'invalid' state
       , placeholder "Enter your email address"
       , value model.email
       , on (onChangeEvent [model.emailState.error, model.state.error]) targetValue (Signal.message address << SetEmail)
@@ -169,7 +172,7 @@ view address model =
       [ type' "text"
       , placeholder "Enter your username"
       , value model.username
-      , on (onChangeEvent [model.usernameState.error, model.state.error]) targetValue (Signal.message address << SetUsername)
+      , on (onChangeEvent [model.usernameState.error, model.state.error]) targetValue (Signal.message setUsernameMailbox.address << SetUsername)
       ] []
     ]
   , div [ class "field error" ] [ label [] [ text <| Maybe.withDefault "" model.state.error ] ]
@@ -185,17 +188,19 @@ view address model =
 
 -- start app boilerplate
 
-actions : Signal.Mailbox Action
-actions = Signal.mailbox NoOp
+setUsernameMailbox : Signal.Mailbox Action
+setUsernameMailbox = Signal.mailbox NoOp
 
 app : StartApp.App Model
 app =
   StartApp.start
-    { init = init
-    , update = update
-    , view = view
-    , inputs = [actions.signal]
-    }
+  { init = init
+  , update = update
+  , view = view
+  , inputs =
+    [ settledAfter (250 *millisecond) setUsernameMailbox.signal
+    ]
+  }
 
 main : Signal Html
 main =
