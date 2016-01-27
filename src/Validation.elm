@@ -260,6 +260,10 @@ validate getValue getState setState syncValidators asyncValidators =
                 ( model', Nothing )
 
 
+
+-- todo: validate : use recursion on synchronous validation to exit early instead of returning model after a failure for every consecutive validation
+
+
 {-| combine combines one or more validation functions and runs
 async validations in sequence.
 -}
