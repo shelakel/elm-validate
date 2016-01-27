@@ -4,7 +4,7 @@ Validation library for elm supporting sync and async validation with state.
 
 ## Current version
 
-2.0.0 (WIP)
+2.0.1 (WIP)
 
 ## Examples
 
@@ -12,8 +12,6 @@ See [examples](https://github.com/shelakel/elm-validate/tree/master/examples)
 
 ```elm
 import Validation
-
-validate = Validation.validate (\transform -> SetValidationState (\model -> (transform model, Effects.none)))
 
 type alias Model =
   { email : String
@@ -23,7 +21,7 @@ type alias Model =
 type Action
   = NoOp
   | SetEmail String
-  | SetValidationState (Model -> (Model, Effects Action))
+  | SetValidationState (Model -> Model)
 
 init : (Model, Effects Action)
 init =
@@ -33,19 +31,28 @@ init =
   }
   Effects.none
 
+validateEmail : Model -> ( Model, Maybe (Task Never (Model -> Model)) )
 validateEmail =
-  validate .email .emailState (\state model -> {model | emailState = state })
-  [ Validation.notEmpty " is required"
-  , Validation.email " is invalid"
-  ] []
+    Validation.validate
+        .email
+        .emailState
+        (\state model -> { model | emailState = state })
+        [ Validation.email " is invalid" ]
+        -- sync validation
+        []
 
 update : Action -> Model -> (Model, Effects Action)
 update action model =
   case action of
     SetEmail value ->
-      validateEmail {model | email = value}
-    SetValidationState transform ->
-      transform model
+      Validation.combine
+          validateEmail
+          { model | email = value }
+          |> Validation.toEffects SetValidationState
+
+    SetValidationState setValidateState ->
+        ( setValidateState model, Effects.none )
+
     NoOp ->
       (model, Effects.none)
 ```
