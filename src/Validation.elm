@@ -1,4 +1,4 @@
-module Validation (State, isNotEmpty, notEmpty, isStringLengthBetween, stringLengthBetween, isValidEmail, email, syncValidate, asyncValidate, isValid, isInvalid, isValidModel, isInvalidModel, listModelErrors, combine, validate, toEffects) where
+module Validation (State, isNotEmpty, notEmpty, isStringLengthBetween, stringLengthBetween, isValidEmail, email, syncValidate, syncValidateState, asyncValidate, isValid, isInvalid, isValidModel, isInvalidModel, listModelErrors, combine, validate, toEffects) where
 
 {-| Validation library for elm supporting sync and async validation with state.
 # Validation state
@@ -6,7 +6,7 @@ module Validation (State, isNotEmpty, notEmpty, isStringLengthBetween, stringLen
 # Validation functions
 @docs isNotEmpty, isStringLengthBetween, isValidEmail
 # Validators
-@docs notEmpty, stringLengthBetween, email, syncValidate, asyncValidate
+@docs notEmpty, stringLengthBetween, email, syncValidate, syncValidateState, asyncValidate
 # Validation
 @docs combine, validate
 # Validation helpers
@@ -167,18 +167,25 @@ listModelErrors states model =
 given a validation function (value -> Bool) for use in validate.
 -}
 syncValidate : (value -> Bool) -> String -> SyncValidator model value state
-syncValidate isValid errorMessage getValue getState =
-    \model ->
-        let
-            oldState = getState model
-        in
-            { oldState
+syncValidate isValid errorMessage =
+    syncValidateState
+        <| \state value ->
+            { state
                 | error =
-                    if (not (isValid (getValue model))) then
+                    if (not (isValid value)) then
                         Just errorMessage
                     else
                         Nothing
             }
+
+
+{-| syncValidateState creates a new synchronous validation function
+given a validate function (state -> value state), similar to asyncValidate
+for use in validate.
+-}
+syncValidateState : (State state -> value -> State state) -> SyncValidator model value state
+syncValidateState validate' getValue getState model =
+    validate' (getState model) (getValue model)
 
 
 {-| asyncValidate creates a new asynchronous validation function
@@ -186,9 +193,8 @@ given a validation function (oldState -> value -> Task Never newState)
 for use in validate.
 -}
 asyncValidate : (State state -> value -> Task Never (State state)) -> AsyncValidator model value state
-asyncValidate validate' =
-    \getValue getState model ->
-        validate' (getState model) (getValue model)
+asyncValidate validate' getValue getState model =
+    validate' (getState model) (getValue model)
 
 
 
