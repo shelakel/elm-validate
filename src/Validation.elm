@@ -220,24 +220,15 @@ validate getValue getState setState syncValidators asyncValidators =
 
             validateAsync = prepareValidator asyncValidators
 
-            runValidateSync =
-                (\validate' model'' ->
-                    if (getState model'').error == Nothing then
-                        setState (validate' model'') model''
-                    else
-                        model''
-                )
-
             oldState = getState model
 
+            -- validate synchronously after resetting state to valid
             model' =
-                -- validate synchronously after resetting state to valid
-                List.foldl
-                    runValidateSync
-                    (setState { oldState | error = Nothing } model)
-                    validateSync
+                runValidateSync setState validateSync (setState { oldState | error = Nothing } model)
+
+            newState = getState model'
         in
-            if (getState model').error == Nothing && List.length validateAsync > 0 then
+            if newState.error == Nothing && List.length validateAsync > 0 then
                 let
                     runValidateAsync =
                         (\next curr ->
@@ -259,15 +250,30 @@ validate getValue getState setState syncValidators asyncValidators =
                             )
                             (Maybe.withDefault [] (List.tail validateAsync))
                 in
-                    ( model'
+                    -- keep the old error to avoid error state flash until async validation is done
+                    ( setState { newState | error = oldState.error } model'
                     , Just <| Task.map setState <| validateAsync' model'
                     )
             else
                 ( model', Nothing )
 
 
+runValidateSync : SetState state model -> List (model -> State state) -> model -> model
+runValidateSync setState list model =
+    case list of
+        [] ->
+            model
 
--- todo: validate : use recursion on synchronous validation to exit early instead of returning model after a failure for every consecutive validation
+        validate' :: validators ->
+            let
+                state = validate' model
+
+                newModel = setState state model
+            in
+                if state.error == Nothing then
+                    runValidateSync setState validators newModel
+                else
+                    newModel
 
 
 {-| combine combines one or more validation functions and runs
