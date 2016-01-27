@@ -25,6 +25,30 @@ type alias State state =
     { state | error : Maybe String }
 
 
+type alias GetValue model value =
+    model -> value
+
+
+type alias GetState model state =
+    model -> State state
+
+
+type alias SetState state model =
+    State state -> model -> model
+
+
+type alias SyncValidator model value state =
+    (model -> value) -> (model -> State state) -> model -> State state
+
+
+type alias AsyncValidator model value state =
+    (model -> value) -> (model -> State state) -> model -> Task Never (State state)
+
+
+type alias Validator model =
+    model -> ( model, Maybe (Task Never (model -> model)) )
+
+
 {-| isNotEmpty returns True when the given String value is not empty.
 -}
 isNotEmpty : String -> Bool
@@ -34,7 +58,7 @@ isNotEmpty x =
 
 {-| notEmpty validates that the given String value is not empty.
 -}
-notEmpty : String -> (model -> String) -> (model -> State state) -> model -> State state
+notEmpty : String -> SyncValidator model String state
 notEmpty =
     syncValidate isNotEmpty
 
@@ -54,7 +78,7 @@ isStringLengthBetween minLength maxLength =
 {-| stringLengthBetween validates that the given String value length is between
 minlength and maxLength inclusive.
 -}
-stringLengthBetween : Int -> Int -> String -> (model -> String) -> (model -> State state) -> model -> State state
+stringLengthBetween : Int -> Int -> String -> SyncValidator model String state
 stringLengthBetween minLength maxLength =
     syncValidate <| isStringLengthBetween minLength maxLength
 
@@ -77,14 +101,14 @@ isValidEmail =
 
 {-| email validates that the given String value is a valid email address.
 -}
-email : String -> (model -> String) -> (model -> State state) -> model -> State state
+email : String -> SyncValidator model String state
 email =
     syncValidate (\x -> String.isEmpty x || (Regex.contains reEmail) x)
 
 
 {-| regex validates that the given String value matches the Regex.
 -}
-regex : Regex.Regex -> String -> (model -> String) -> (model -> State state) -> model -> State state
+regex : Regex.Regex -> String -> SyncValidator model String state
 regex re =
     syncValidate (Regex.contains re)
 
@@ -142,7 +166,7 @@ listModelErrors states model =
 {-| syncValidate creates a new synchronous validation function
 given a validation function (value -> Bool) for use in validate.
 -}
-syncValidate : (value -> Bool) -> String -> (model -> value) -> (model -> State state) -> model -> State state
+syncValidate : (value -> Bool) -> String -> SyncValidator model value state
 syncValidate isValid errorMessage getValue getState =
     \model ->
         let
@@ -161,7 +185,7 @@ syncValidate isValid errorMessage getValue getState =
 given a validation function (oldState -> value -> Task Never newState)
 for use in validate.
 -}
-asyncValidate : (State state -> value -> Task Never (State state)) -> (model -> value) -> (model -> State state) -> model -> Task Never (State state)
+asyncValidate : (State state -> value -> Task Never (State state)) -> AsyncValidator model value state
 asyncValidate validate' =
     \getValue getState model ->
         validate' (getState model) (getValue model)
@@ -180,7 +204,7 @@ a single effect (update validation state) is returned for chained validations.
 The value is first validated using chained synchronous validation functions (first failure returned),
 thereafter if the value is valid, asynchronous validation functions are chained (first failure returned).
 -}
-validate : (model -> value) -> (model -> State state) -> (State state -> model -> model) -> List ((model -> value) -> (model -> State state) -> model -> State state) -> List ((model -> value) -> (model -> State state) -> model -> Task Never (State state)) -> model -> ( model, Maybe (Task Never (model -> model)) )
+validate : GetValue model value -> GetState model state -> SetState state model -> List (SyncValidator model value state) -> List (AsyncValidator model value state) -> Validator model
 validate getValue getState setState syncValidators asyncValidators =
     \model ->
         let
@@ -239,7 +263,7 @@ validate getValue getState setState syncValidators asyncValidators =
 {-| combine combines one or more validation functions and runs
 async validations in sequence.
 -}
-combine : List (model -> ( model, Maybe (Task Never (model -> model)) )) -> model -> ( model, Maybe (Task Never (model -> model)) )
+combine : List (Validator model) -> Validator model
 combine validators =
     \model' ->
         let

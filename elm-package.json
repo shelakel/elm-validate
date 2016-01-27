@@ -1,5 +1,5 @@
 {
-    "version": "2.0.0",
+    "version": "2.0.1",
     "summary": "Validation library for elm supporting sync and async validation with state",
     "repository": "https://github.com/shelakel/elm-validate.git",
     "license": "MIT",
