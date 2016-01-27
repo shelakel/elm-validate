@@ -52,8 +52,8 @@ type alias Validator model =
 {-| isNotEmpty returns True when the given String value is not empty.
 -}
 isNotEmpty : String -> Bool
-isNotEmpty x =
-    not (String.isEmpty x)
+isNotEmpty =
+    not << String.isEmpty
 
 
 {-| notEmpty validates that the given String value is not empty.
@@ -136,8 +136,8 @@ isValidModel states =
 {-| isInvalid tests if the validation state has an error.
 -}
 isInvalid : { error : Maybe String } -> Bool
-isInvalid state =
-    not (isValid state)
+isInvalid =
+    not << isValid
 
 
 {-| isInvalidModel, given a model, tests if any validation states are invalid.
