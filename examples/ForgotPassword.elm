@@ -256,7 +256,7 @@ app =
         , update = update
         , view = view
         , inputs =
-            [ settledAfter (250 * millisecond) setUsernameMailbox.signal
+            [ settledAfter (400 * millisecond) setUsernameMailbox.signal
             ]
         }
 
