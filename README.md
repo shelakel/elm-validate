@@ -4,7 +4,7 @@ Validation library for elm supporting sync and async validation with state.
 
 ## Current version
 
-2.1.0 (WIP)
+3.0.0 (WIP)
 
 ## Examples
 
@@ -31,14 +31,17 @@ init =
   }
   Effects.none
 
-validateEmail : Model -> ( Model, Maybe (Task Never (Model -> Model)) )
+validateEmail : Validation.Validator
 validateEmail =
-    Validation.validate
+    Validation.validator
         .email
         .emailState
         (\state model -> { model | emailState = state })
-        [ Validation.email " is invalid" ]
         -- sync validation
+        [ Validation.email "Email is invalid"
+        , Validation.basic (\state value -> value /= "test@test") "Email can't be test@test"
+        ]
+        -- async validation
         []
 
 update : Action -> Model -> (Model, Effects Action)

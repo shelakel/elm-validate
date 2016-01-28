@@ -1,4 +1,4 @@
-module Validation (State, isNotEmpty, notEmpty, isStringLengthBetween, stringLengthBetween, isValidEmail, email, syncValidate, syncValidateState, asyncValidate, isValid, isInvalid, isValidModel, isInvalidModel, listModelErrors, combine, validate, toEffects) where
+module Validation (State, SyncValidator, AsyncValidator, Validator, isNotEmpty, notEmpty, isStringLengthBetween, stringLengthBetween, isValidEmail, email, basic, isValid, isInvalid, isValidModel, isInvalidModel, listModelErrors, combine, validator, toEffects) where
 
 {-| Validation library for elm supporting sync and async validation with state.
 # Validation state
@@ -6,17 +6,17 @@ module Validation (State, isNotEmpty, notEmpty, isStringLengthBetween, stringLen
 # Validation functions
 @docs isNotEmpty, isStringLengthBetween, isValidEmail
 # Validators
-@docs notEmpty, stringLengthBetween, email, syncValidate, syncValidateState, asyncValidate
+@docs notEmpty, stringLengthBetween, email, basic, SyncValidator, AsyncValidator
 # Validation
-@docs combine, validate
+@docs combine, validator, Validator
 # Validation helpers
 @docs isValid, isInvalid, isValidModel, isInvalidModel, listModelErrors, toEffects
 -}
 
-import Task exposing (Task)
 import Effects exposing (Effects, Never)
 import Regex
 import String
+import Task exposing (Task)
 
 
 {-| State holds validation state.
@@ -25,62 +25,24 @@ type alias State state =
     { state | error : Maybe String }
 
 
-type alias GetValue model value =
-    model -> value
+{-| SyncValidator does synchronous validation.
+-}
+type alias SyncValidator state value =
+    State state -> value -> State state
 
 
-type alias GetState model state =
-    model -> State state
+{-| AsyncValidator does asynchronous validation.
+-}
+type alias AsyncValidator state value =
+    State state -> value -> Task Never (State state)
 
 
-type alias SetState state model =
-    State state -> model -> model
-
-
-type alias SyncValidator model value state =
-    (model -> value) -> (model -> State state) -> model -> State state
-
-
-type alias AsyncValidator model value state =
-    (model -> value) -> (model -> State state) -> model -> Task Never (State state)
-
-
+{-| Validator takes a model, performs synchronous and asynchronous validation
+and procudes a model with updated validation state and possibly a deffered model transform
+to update asynchronous validation state.
+-}
 type alias Validator model =
     model -> ( model, Maybe (Task Never (model -> model)) )
-
-
-{-| isNotEmpty returns True when the given String value is not empty.
--}
-isNotEmpty : String -> Bool
-isNotEmpty =
-    not << String.isEmpty
-
-
-{-| notEmpty validates that the given String value is not empty.
--}
-notEmpty : String -> SyncValidator model String state
-notEmpty =
-    syncValidate isNotEmpty
-
-
-{-| isStringLengthBetween returns True when the length of the String value
-is between minLength and maxLength inclusive.
--}
-isStringLengthBetween : Int -> Int -> String -> Bool
-isStringLengthBetween minLength maxLength =
-    \x ->
-        let
-            len = String.length x
-        in
-            len >= minLength && len <= maxLength
-
-
-{-| stringLengthBetween validates that the given String value length is between
-minlength and maxLength inclusive.
--}
-stringLengthBetween : Int -> Int -> String -> SyncValidator model String state
-stringLengthBetween minLength maxLength =
-    syncValidate <| isStringLengthBetween minLength maxLength
 
 
 {-| reEmail is an email validation Regex.
@@ -92,6 +54,28 @@ reEmail =
         |> Regex.caseInsensitive
 
 
+
+-- validation functions
+
+
+{-| isNotEmpty returns True when the given String value is not empty.
+-}
+isNotEmpty : String -> Bool
+isNotEmpty =
+    not << String.isEmpty
+
+
+{-| isStringLengthBetween returns True when the length of the String value
+is between minLength and maxLength inclusive.
+-}
+isStringLengthBetween : Int -> Int -> String -> Bool
+isStringLengthBetween minLength maxLength value =
+    let
+        len = String.length value
+    in
+        len >= minLength && len <= maxLength
+
+
 {-| isValidEmail returns True when the given String value is a valid email address.
 -}
 isValidEmail : String -> Bool
@@ -99,57 +83,86 @@ isValidEmail =
     Regex.contains reEmail
 
 
-{-| email validates that the given String value is a valid email address.
+
+-- basic validators
+
+
+{-| notEmpty validates that the given String value is not empty.
 -}
-email : String -> SyncValidator model String state
-email =
-    syncValidate (\x -> String.isEmpty x || (Regex.contains reEmail) x)
+notEmpty : String -> State state -> String -> State state
+notEmpty =
+    basic isNotEmpty
+
+
+{-| stringLengthBetween validates that the given String value length is between
+minlength and maxLength inclusive.
+-}
+stringLengthBetween : Int -> Int -> String -> State state -> String -> State state
+stringLengthBetween minLength maxLength =
+    basic <| isStringLengthBetween minLength maxLength
 
 
 {-| regex validates that the given String value matches the Regex.
 -}
-regex : Regex.Regex -> String -> SyncValidator model String state
+regex : Regex.Regex -> String -> State state -> String -> State state
 regex re =
-    syncValidate (Regex.contains re)
+    basic (Regex.contains re)
+
+
+{-| email validates that the given String value is a valid email address.
+-}
+email : String -> State state -> String -> State state
+email =
+    basic
+        <| \x -> String.isEmpty x || isValidEmail x
+
+
+{-| basic does value based, synchronous validation. \
+-}
+basic : (value -> Bool) -> String -> SyncValidator state value
+basic isValid errorMessage oldState value =
+    if isValid value then
+        oldState
+    else
+        { oldState | error = Just errorMessage }
 
 
 
--- validation helpers
+-- helper functions
 
 
 {-| isValid tests if the validation state has no error.
 -}
-isValid : { error : Maybe String } -> Bool
+isValid : State state -> Bool
 isValid state =
     state.error == Nothing
 
 
-{-| isValidModel, given a model, tests if all the validation states are valid.
--}
-isValidModel : List (model -> { error : Maybe String }) -> model -> Bool
-isValidModel states =
-    \model ->
-        List.map (\getState -> getState model) states
-            |> List.all (\state -> state.error == Nothing)
-
-
 {-| isInvalid tests if the validation state has an error.
 -}
-isInvalid : { error : Maybe String } -> Bool
+isInvalid : State state -> Bool
 isInvalid =
     not << isValid
 
 
+{-| isValidModel, given a model, tests if all the validation states are valid.
+-}
+isValidModel : List (model -> State state) -> model -> Bool
+isValidModel states model =
+    List.map (\getState -> getState model) states
+        |> List.all isValid
+
+
 {-| isInvalidModel, given a model, tests if any validation states are invalid.
 -}
-isInvalidModel : List (model -> { error : Maybe String }) -> model -> Bool
-isInvalidModel states model =
-    not (isValidModel states model)
+isInvalidModel : List (model -> State state) -> model -> Bool
+isInvalidModel states =
+    not << isValidModel states
 
 
 {-| listModelErrors, given a model, extracts a list of errors for invalid validation states.
 -}
-listModelErrors : List (model -> { error : Maybe String }) -> model -> Maybe (List String)
+listModelErrors : List (model -> State state) -> model -> Maybe (List String)
 listModelErrors states model =
     let
         errors =
@@ -163,167 +176,115 @@ listModelErrors states model =
             Nothing
 
 
-{-| syncValidate creates a new synchronous validation function
-given a validation function (value -> Bool) for use in validate.
+
+-- validation
+
+
+{-| validator creates a validator to validate a model using synchronous and asynchronous validation functions.
+
+Order of validation:
+  1. Synchronous validation is done in sequence and returns on the first error encountered.
+  2. If synchronous validation deemed the value invalid, then the new validation state is returned and no asynchronous validation is done.
+  3. Otherwise, asynchronous validation is done in sequence on the value at the point of validation, starting with the new validation state, and returns on the first error encountered.
+  - When asynchronous validation needs to be done, the previous error will be kept to avoid flashing of valid status when used with debouncing. E.g. checking if a username is available
 -}
-syncValidate : (value -> Bool) -> String -> SyncValidator model value state
-syncValidate isValid errorMessage =
-    syncValidateState
-        <| \state value ->
-            { state
-                | error =
-                    if (not (isValid value)) then
-                        Just errorMessage
-                    else
-                        Nothing
-            }
+validator : (model -> value) -> (model -> State state) -> (State state -> model -> model) -> List (SyncValidator state value) -> List (AsyncValidator state value) -> Validator model
+validator getValue getState setState syncValidators asyncValidators model =
+    let
+        state = getState model
 
+        value = getValue model
 
-{-| syncValidateState creates a new synchronous validation function
-given a validate function (state -> value state), similar to asyncValidate
-for use in validate.
--}
-syncValidateState : (State state -> value -> State state) -> SyncValidator model value state
-syncValidateState validate' getValue getState model =
-    validate' (getState model) (getValue model)
-
-
-{-| asyncValidate creates a new asynchronous validation function
-given a validation function (oldState -> value -> Task Never newState)
-for use in validate.
--}
-asyncValidate : (State state -> value -> Task Never (State state)) -> AsyncValidator model value state
-asyncValidate validate' getValue getState model =
-    validate' (getState model) (getValue model)
-
-
-
--- validation runner
-
-
-{-| validate validates a model with synchronous and asynchronous validation
-functions.
-
-Asynchronous validation is done on the value at the point of validation and
-a single effect (update validation state) is returned for chained validations.
-
-The value is first validated using chained synchronous validation functions (first failure returned),
-thereafter if the value is valid, asynchronous validation functions are chained (first failure returned).
--}
-validate : GetValue model value -> GetState model state -> SetState state model -> List (SyncValidator model value state) -> List (AsyncValidator model value state) -> Validator model
-validate getValue getState setState syncValidators asyncValidators =
-    \model ->
-        let
-            prepareValidator = List.map (\fn -> fn getValue getState)
-
-            validateSync = prepareValidator syncValidators
-
-            validateAsync = prepareValidator asyncValidators
-
-            oldState = getState model
-
-            -- validate synchronously after resetting state to valid
-            model' =
-                runValidateSync setState validateSync (setState { oldState | error = Nothing } model)
-
-            newState = getState model'
-        in
-            if newState.error == Nothing && List.length validateAsync > 0 then
-                let
-                    runValidateAsync =
-                        (\next curr ->
-                            \model1 ->
-                                (curr model1)
-                                    `Task.andThen` \newState ->
-                                                    if newState.error == Nothing then
-                                                        (next (setState newState model1))
-                                                    else
-                                                        Task.succeed newState
-                        )
-
-                    validateAsync' =
-                        List.foldl
-                            runValidateAsync
-                            (Maybe.withDefault
-                                (\model1 -> Task.succeed <| getState model1)
-                                (List.head validateAsync)
-                            )
-                            (Maybe.withDefault [] (List.tail validateAsync))
-                in
-                    -- keep the old error to avoid error state flash until async validation is done
-                    ( setState { newState | error = oldState.error } model'
-                    , Just <| Task.map setState <| validateAsync' model'
-                    )
-            else
-                ( model', Nothing )
-
-
-runValidateSync : SetState state model -> List (model -> State state) -> model -> model
-runValidateSync setState list model =
-    case list of
-        [] ->
-            model
-
-        validate' :: validators ->
+        state' = validateSync value syncValidators { state | error = Nothing }
+    in
+        if isValid state' && List.length asyncValidators > 0 then
             let
-                state = validate' model
-
-                newModel = setState state model
+                -- retain the old error when validating async to avoid the flash
+                -- when previous async validation state was invalid,
+                -- the current synchronous validation state is invalid
+                -- and the next async validation state is invalid
+                state'' = { state' | error = state.error }
             in
-                if state.error == Nothing then
-                    runValidateSync setState validators newModel
+                ( setState state'' model
+                , Just <| Task.map setState (validateAsync value asyncValidators (Task.succeed state'))
+                )
+        else
+            ( setState state' model
+            , Nothing
+            )
+
+
+validateSync : value -> List (SyncValidator state value) -> State state -> State state
+validateSync value validators state =
+    case validators of
+        [] ->
+            state
+
+        validate' :: validators' ->
+            let
+                state' = validate' state value
+            in
+                if isValid state' then
+                    validateSync value validators' state'
                 else
-                    newModel
+                    state'
+
+
+validateAsync : value -> List (AsyncValidator state value) -> Task Never (State state) -> Task Never (State state)
+validateAsync value validators ts =
+    case validators of
+        [] ->
+            ts
+
+        validate' :: validators' ->
+            ts
+                `Task.andThen` \state ->
+                                if isValid state then
+                                    validateAsync value validators' (validate' state value)
+                                else
+                                    Task.succeed state
 
 
 {-| combine combines one or more validation functions and runs
 async validations in sequence.
 -}
 combine : List (Validator model) -> Validator model
-combine validators =
-    \model' ->
-        let
-            ( model, tasks ) =
-                List.foldl
-                    (\validate ( model, tasks ) ->
-                        let
-                            ( newModel, newTask ) = validate model
-                        in
-                            ( newModel
-                            , case newTask of
-                                Just task ->
-                                    task :: tasks
-
-                                Nothing ->
-                                    tasks
-                            )
-                    )
-                    ( model', [] )
-                    validators
-        in
-            if List.length tasks == 0 then
-                ( model, Nothing )
-            else
-                ( model
-                , Just
-                    <| (Task.sequence tasks)
-                    `Task.andThen` \tasks' ->
-                                    Task.succeed
-                                        <| \model' ->
-                                            -- transform the model
-                                            List.foldr
-                                                (\t m -> t m)
-                                                model'
-                                                tasks'
-                )
+combine validators model =
+    combineHelper validators model []
 
 
+combineHelper : List (Validator model) -> model -> List (Task Never (model -> model)) -> ( model, Maybe (Task Never (model -> model)) )
+combineHelper validators model tasks =
+    case validators of
+        [] ->
+            let
+                ts =
+                    if List.length tasks > 0 then
+                        Just
+                            <| (Task.sequence tasks)
+                            `Task.andThen` \transforms ->
+                                            Task.succeed
+                                                <| \model' ->
+                                                    List.foldr
+                                                        (\t m -> t m)
+                                                        model'
+                                                        transforms
+                    else
+                        Nothing
+            in
+                ( model, ts )
 
-{- -
-todo: combine should execute tasks in parallel instead of in sequence
-because validators should own non-shared state and return state transforms.
--
--}
+        validate' :: validators' ->
+            let
+                ( model', task ) = validate' model
+            in
+                combineHelper validators' model'
+                    <| case task of
+                        Just ts ->
+                            ts :: tasks
+
+                        Nothing ->
+                            tasks
 
 
 {-| toEffects transforms a validation result to a (model, Effects action),

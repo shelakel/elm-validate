@@ -45,9 +45,9 @@ init =
         Effects.none
 
 
-validateEmail : Model -> ( Model, Maybe (Task Never (Model -> Model)) )
+validateEmail : Validation.Validator Model
 validateEmail =
-    Validation.validate
+    Validation.validator
         .email
         .emailState
         (\state model -> { model | emailState = state })
@@ -60,31 +60,30 @@ validateEmail =
 -- note: throttling/debounce is done on the setUsernameMailbox.signal
 
 
-checkUsernameExists =
-    Validation.asyncValidate
-        <| \oldState value ->
-            let
-                latencyRng = Random.float 25 250
+checkUsernameExists : Validation.AsyncValidator { seed : Random.Seed } String
+checkUsernameExists state value =
+    let
+        latencyRng = Random.float 25 250
 
-                -- simulate latency delay
-                ( latency, newSeed ) = Random.generate latencyRng oldState.seed
-            in
-                Task.andThen (Task.sleep latency)
-                    <| \_ ->
-                        Task.succeed
-                            { oldState
-                                | seed = newSeed
-                                , error =
-                                    if ((not (String.isEmpty value)) && value /= "test") then
-                                        Just (" \"" ++ value ++ "\" is not registered. " ++ (toString latency))
-                                    else
-                                        Nothing
-                            }
+        -- simulate latency delay
+        ( latency, newSeed ) = Random.generate latencyRng state.seed
+    in
+        Task.sleep latency
+            `Task.andThen` \_ ->
+                            Task.succeed
+                                { state
+                                    | seed = newSeed
+                                    , error =
+                                        if Validation.isNotEmpty value && value /= "test" then
+                                            Just (" \"" ++ value ++ "\" is not registered. (" ++ (toString latency) ++ "ms)")
+                                        else
+                                            Nothing
+                                }
 
 
-validateUsername : Model -> ( Model, Maybe (Task Never (Model -> Model)) )
+validateUsername : Validation.Validator Model
 validateUsername =
-    Validation.validate
+    Validation.validator
         .username
         .usernameState
         (\state model -> { model | usernameState = state })
@@ -96,20 +95,20 @@ validateUsername =
 -- async validation
 
 
-validateUsernameOrEmail : Model -> ( Model, Maybe (Task Never (Model -> Model)) )
+validateUsernameOrEmail : Validation.Validator Model
 validateUsernameOrEmail =
-    Validation.validate
+    Validation.validator
         (\model -> ( model.username, model.email ))
         .state
         (\state model -> { model | state = state })
-        [ Validation.syncValidate
+        [ Validation.basic
             (\( username, email ) -> not ((String.isEmpty username) && (String.isEmpty email)))
             "Please enter your email or username."
         ]
         []
 
 
-validateModel : Model -> ( Model, Maybe (Task Never (Model -> Model)) )
+validateModel : Validation.Validator Model
 validateModel =
     Validation.combine
         <| [ validateEmail
