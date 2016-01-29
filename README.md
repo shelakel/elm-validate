@@ -48,9 +48,7 @@ update : Action -> Model -> (Model, Effects Action)
 update action model =
   case action of
     SetEmail value ->
-      Validation.combine
-          validateEmail
-          { model | email = value }
+        validateEmail { model | email = value }
           |> Validation.toEffects SetValidationState
 
     SetValidationState setValidateState ->
