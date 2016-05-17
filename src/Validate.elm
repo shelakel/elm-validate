@@ -169,7 +169,8 @@ isInvalid =
 -}
 isValidModel : List (model -> State state) -> model -> Bool
 isValidModel states model =
-    List.map (\getState -> getState model) states
+    states
+        |> List.map (\getState -> getState model)
         |> List.all isValid
 
 
@@ -186,8 +187,9 @@ listModelErrors : List (model -> State state) -> model -> Maybe (List String)
 listModelErrors states model =
     let
         errors =
-            List.filterMap (\state -> state.error)
-                (List.map (\getState -> getState model) states)
+            states
+                |> List.map (\getState -> getState model)
+                |> List.filterMap (\state -> state.error)
     in
         if List.length errors > 0 then
             Just errors
