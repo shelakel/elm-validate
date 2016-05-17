@@ -4,7 +4,7 @@ Validation library for elm supporting sync and async validation with state.
 
 ## Current version
 
-4.0.0 (Elm 0.17)
+1.0.0 (Elm 0.17)
 
 ## Examples
 
