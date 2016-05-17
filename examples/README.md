@@ -2,6 +2,8 @@
 
 ## Running examples
 
+Note: Elm reactor (0.17) doesn't load external CSS
+
  1. [Install elm if you haven't](http://elm-lang.org/install)
  2. Clone the repository: `git clone https://github.com/shelakel/elm-validate.git`
  3. `cd elm-validate`

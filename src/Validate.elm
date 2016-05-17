@@ -1,4 +1,25 @@
-module Validation (State, SyncValidator, AsyncValidator, Validator, isNotEmpty, notEmpty, isStringLengthBetween, stringLengthBetween, isValidEmail, email, basic, isValid, isInvalid, isValidModel, isInvalidModel, listModelErrors, combine, validator, toEffects) where
+module Validate
+    exposing
+        ( State
+        , SyncValidator
+        , AsyncValidator
+        , Validator
+        , isNotEmpty
+        , notEmpty
+        , isStringLengthBetween
+        , stringLengthBetween
+        , isValidEmail
+        , email
+        , basic
+        , isValid
+        , isInvalid
+        , isValidModel
+        , isInvalidModel
+        , listModelErrors
+        , combine
+        , validator
+        , toCmd
+        )
 
 {-| Validation library for elm supporting sync and async validation with state.
 # Validation state
@@ -10,10 +31,9 @@ module Validation (State, SyncValidator, AsyncValidator, Validator, isNotEmpty, 
 # Validation
 @docs combine, validator, Validator
 # Validation helpers
-@docs isValid, isInvalid, isValidModel, isInvalidModel, listModelErrors, toEffects
+@docs isValid, isInvalid, isValidModel, isInvalidModel, listModelErrors, toCmd
 -}
 
-import Effects exposing (Effects, Never)
 import Regex
 import String
 import Task exposing (Task)
@@ -49,8 +69,7 @@ type alias Validator model =
 -}
 reEmail : Regex.Regex
 reEmail =
-    Regex.regex
-        "^[a-zA-Z0-9.!#$%&'*+\\/=?^_`{|}~-]+@[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(?:\\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*$"
+    Regex.regex "^[a-zA-Z0-9.!#$%&'*+\\/=?^_`{|}~-]+@[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(?:\\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*$"
         |> Regex.caseInsensitive
 
 
@@ -71,7 +90,8 @@ is between minLength and maxLength inclusive.
 isStringLengthBetween : Int -> Int -> String -> Bool
 isStringLengthBetween minLength maxLength value =
     let
-        len = String.length value
+        len =
+            String.length value
     in
         len >= minLength && len <= maxLength
 
@@ -166,8 +186,7 @@ listModelErrors : List (model -> State state) -> model -> Maybe (List String)
 listModelErrors states model =
     let
         errors =
-            List.filterMap
-                (\state -> state.error)
+            List.filterMap (\state -> state.error)
                 (List.map (\getState -> getState model) states)
     in
         if List.length errors > 0 then
@@ -191,11 +210,14 @@ Order of validation:
 validator : (model -> value) -> (model -> State state) -> (State state -> model -> model) -> List (SyncValidator state value) -> List (AsyncValidator state value) -> Validator model
 validator getValue getState setState syncValidators asyncValidators model =
     let
-        state = getState model
+        state =
+            getState model
 
-        value = getValue model
+        value =
+            getValue model
 
-        state' = validateSync value syncValidators { state | error = Nothing }
+        state' =
+            validateSync value syncValidators { state | error = Nothing }
     in
         if isValid state' && List.length asyncValidators > 0 then
             let
@@ -203,7 +225,8 @@ validator getValue getState setState syncValidators asyncValidators model =
                 -- when previous async validation state was invalid,
                 -- the current synchronous validation state is invalid
                 -- and the next async validation state is invalid
-                state'' = { state' | error = state.error }
+                state'' =
+                    { state' | error = state.error }
             in
                 ( setState state'' model
                 , Just <| Task.map setState (validateAsync value asyncValidators (Task.succeed state'))
@@ -222,7 +245,8 @@ validateSync value validators state =
 
         validate' :: validators' ->
             let
-                state' = validate' state value
+                state' =
+                    validate' state value
             in
                 if isValid state' then
                     validateSync value validators' state'
@@ -265,8 +289,7 @@ combineHelper validators model tasks =
                             `Task.andThen` \transforms ->
                                             Task.succeed
                                                 <| \model' ->
-                                                    List.foldr
-                                                        (\t m -> t m)
+                                                    List.foldr (\t m -> t m)
                                                         model'
                                                         transforms
                     else
@@ -276,7 +299,8 @@ combineHelper validators model tasks =
 
         validate' :: validators' ->
             let
-                ( model', task ) = validate' model
+                ( model', task ) =
+                    validate' model
             in
                 combineHelper validators' model'
                     <| case task of
@@ -287,16 +311,16 @@ combineHelper validators model tasks =
                             tasks
 
 
-{-| toEffects transforms a validation result to a (model, Effects action),
-mapping the model transform to an action.
+{-| toCmd maps the validation result model and effects transforms to a (model, Cmd msg),
+using a tagger that turns the model transform into a msg.
 -}
-toEffects : ((model -> model) -> action) -> ( model, Maybe (Task Never (model -> model)) ) -> ( model, Effects action )
-toEffects transformAction ( model, maybeTask ) =
+toCmd : ((model -> model) -> msg) -> ( model, Maybe (Task Never (model -> model)) ) -> ( model, Cmd msg )
+toCmd tagger ( model, maybeTask ) =
     ( model
     , case maybeTask of
         Just task ->
-            Task.map transformAction task |> Effects.task
+            Task.perform (\_ -> tagger (\x -> x)) tagger task
 
         Nothing ->
-            Effects.none
+            Cmd.none
     )

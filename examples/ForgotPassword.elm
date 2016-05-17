@@ -1,125 +1,126 @@
-module ForgotPassword (..) where
+module ForgotPassword exposing (main)
 
-import Validation
-import Effects exposing (Effects, Never)
+import Json.Decode
 import Html exposing (..)
+import Html.App exposing (program)
 import Html.Attributes exposing (..)
 import Html.Events exposing (..)
-import Signal.Time exposing (settledAfter)
-import StartApp
+import Process
 import Random
 import String
 import Task exposing (Task)
 import Time exposing (millisecond)
+import Validate
+import Debounce exposing (..)
 
 
 type alias Model =
     { email : String
-    , emailState : Validation.State {}
+    , emailState : Validate.State {}
     , username : String
-    , usernameState : Validation.State { seed : Random.Seed }
+    , usernameDebouncer : Debouncer String
+    , usernameState : Validate.State { seed : Random.Seed }
     , message : Maybe String
-    , state : Validation.State {}
+    , state : Validate.State {}
     }
 
 
-type Action
+type Msg
     = NoOp
     | SetEmail String
     | SetUsername String
+    | DebounceUsername (DebouncerMsg String)
     | BeginSubmit
     | EndSubmit (Model -> Model)
-    | SetValidationState (Model -> Model)
+    | SetValidateState (Model -> Model)
 
 
-init : ( Model, Effects Action )
+init : ( Model, Cmd Msg )
 init =
     (,)
         { email = ""
         , emailState = { error = Nothing }
         , username = ""
+        , usernameDebouncer = initDebouncer
         , usernameState = { seed = Random.initialSeed 0, error = Nothing }
         , message = Nothing
         , state = { error = Nothing }
         }
-        Effects.none
+        Cmd.none
 
 
-validateEmail : Validation.Validator Model
+validateEmail : Validate.Validator Model
 validateEmail =
-    Validation.validator
-        .email
+    Validate.validator .email
         .emailState
         (\state model -> { model | emailState = state })
-        [ Validation.email " is invalid" ]
-        -- sync validation
+        --  sync validators
+        [ Validate.email " is invalid" ]
+        -- async validators
         []
 
 
-
--- note: throttling/debounce is done on the setUsernameMailbox.signal
-
-
-checkUsernameExists : Validation.AsyncValidator { seed : Random.Seed } String
+checkUsernameExists : Validate.AsyncValidator { seed : Random.Seed } String
 checkUsernameExists state value =
     let
-        latencyRng = Random.float 25 250
+        latencyRng =
+            Random.float 25 250
 
         -- simulate latency delay
-        ( latency, newSeed ) = Random.generate latencyRng state.seed
+        ( latency, newSeed ) =
+            Random.step latencyRng state.seed
     in
-        Task.sleep latency
+        Process.sleep latency
             `Task.andThen` \_ ->
                             Task.succeed
                                 { state
                                     | seed = newSeed
                                     , error =
-                                        if Validation.isNotEmpty value && value /= "test" then
+                                        if Validate.isNotEmpty value && value /= "test" then
                                             Just (" \"" ++ value ++ "\" is not registered. (" ++ (toString latency) ++ "ms)")
                                         else
                                             Nothing
                                 }
 
 
-validateUsername : Validation.Validator Model
+validateUsername : Validate.Validator Model
 validateUsername =
-    Validation.validator
-        .username
+    Validate.validator .username
         .usernameState
         (\state model -> { model | usernameState = state })
+        --  sync validators
         []
+        -- async validators
         [ checkUsernameExists ]
 
 
-
--- async validation
-
-
-validateUsernameOrEmail : Validation.Validator Model
+validateUsernameOrEmail : Validate.Validator Model
 validateUsernameOrEmail =
-    Validation.validator
-        (\model -> ( model.username, model.email ))
+    Validate.validator (\model -> ( model.username, model.email ))
         .state
         (\state model -> { model | state = state })
-        [ Validation.basic
-            (\( username, email ) -> not ((String.isEmpty username) && (String.isEmpty email)))
+        --  sync validators
+        [ Validate.basic (\( username, email ) -> not ((String.isEmpty username) && (String.isEmpty email)))
             "Please enter your email or username."
         ]
+        -- async validators
         []
 
 
-validateModel : Validation.Validator Model
+validateModel : Validate.Validator Model
 validateModel =
-    Validation.combine
+    Validate.combine
         <| [ validateEmail
            , validateUsername
            , validateUsernameOrEmail
            ]
 
 
-modelValidationStates : List (Model -> { error : Maybe String })
-modelValidationStates =
+modelValidateStates : List (Model -> { error : Maybe String })
+modelValidateStates =
     [ .emailState
+      -- extract error because the usernameState contains other fields
+      -- causing the Model -> { error: Maybe String } to not match
     , \model -> { error = model.usernameState.error }
     , .state
     ]
@@ -127,51 +128,76 @@ modelValidationStates =
 
 isValidModel : Model -> Bool
 isValidModel =
-    Validation.isValidModel modelValidationStates
+    Validate.isValidModel modelValidateStates
 
 
 isInvalidModel : Model -> Bool
 isInvalidModel =
-    Validation.isInvalidModel modelValidationStates
+    Validate.isInvalidModel modelValidateStates
 
 
-update : Action -> Model -> ( Model, Effects Action )
-update action model =
-    case action of
+update : Msg -> Model -> ( Model, Cmd Msg )
+update msg model =
+    case msg of
         SetEmail value ->
-            Validation.combine
+            Validate.combine
                 [ validateEmail
                 , validateUsernameOrEmail
                 ]
                 { model | email = value }
-                |> Validation.toEffects SetValidationState
+                |> Validate.toCmd SetValidateState
 
         SetUsername value ->
-            Validation.combine
+            Validate.combine
                 [ validateUsername
                 , validateUsernameOrEmail
                 ]
                 { model | username = value }
-                |> Validation.toEffects SetValidationState
+                |> Validate.toCmd SetValidateState
+
+        DebounceUsername value ->
+            let
+                -- set the username on the model,
+                -- otherwise causes laggy behaviour for on "input"
+                -- due to setting the attribute: value model.username
+                -- on the input
+                s =
+                    case value of
+                        Bounce v ->
+                            v
+
+                        _ ->
+                            model.username
+
+                ( newDebouncer, eff ) =
+                    updateDebouncer (500 * millisecond)
+                        SetUsername
+                        value
+                        model.usernameDebouncer
+            in
+                ( { model | username = s, usernameDebouncer = newDebouncer }
+                , Cmd.map (handleDebouncerResults DebounceUsername) eff
+                )
 
         BeginSubmit ->
             validateModel model
-                |> Validation.toEffects EndSubmit
+                |> Validate.toCmd EndSubmit
 
         EndSubmit setValidateState ->
             let
-                newModel = setValidateState model
+                newModel =
+                    setValidateState model
             in
                 if isValidModel newModel then
-                    ( { newModel | message = Just "Submit: Valid" }, Effects.none )
+                    ( { newModel | message = Just "Submit: Valid" }, Cmd.none )
                 else
-                    ( { newModel | message = Just "Submit: Invalid" }, Effects.none )
+                    ( { newModel | message = Just "Submit: Invalid" }, Cmd.none )
 
-        SetValidationState setValidateState ->
-            ( setValidateState model, Effects.none )
+        SetValidateState setValidateState ->
+            ( setValidateState model, Cmd.none )
 
         NoOp ->
-            ( model, Effects.none )
+            ( model, Cmd.none )
 
 
 onChangeEvent : List (Maybe String) -> String
@@ -182,17 +208,16 @@ onChangeEvent errors =
         "input"
 
 
-view : Signal.Address Action -> Model -> Html
-view address model =
-    Html.form
-        [ novalidate True ]
+view : Model -> Html Msg
+view model =
+    Html.form [ novalidate True ]
         [ node "link" [ href "./forgot-password.css", rel "stylesheet" ] []
         , h1 [] [ text "Forgot password" ]
         , p [] [ text "Please enter your email or username below to reset your password." ]
         , div
             [ class
                 <| "field"
-                ++ (if model.emailState.error == Nothing then
+                ++ (if Validate.isValid model.emailState then
                         ""
                     else
                         " error"
@@ -201,10 +226,10 @@ view address model =
             [ label [] [ text <| "Email" ++ (Maybe.withDefault "" model.emailState.error) ]
             , input
                 [ type' "email"
-                  -- , autofocus True -- removed to demonstrate submit validation 'invalid' state
+                  -- , autofocus True -- removed to demonstrate submit Validate 'invalid' state
                 , placeholder "Enter your email address"
                 , value model.email
-                , on (onChangeEvent [ model.emailState.error, model.state.error ]) targetValue (Signal.message address << SetEmail)
+                , on (onChangeEvent [ model.emailState.error, model.state.error ]) (Json.Decode.map SetEmail targetValue)
                 ]
                 []
             ]
@@ -212,7 +237,7 @@ view address model =
         , div
             [ class
                 <| "field"
-                ++ (if model.usernameState.error == Nothing then
+                ++ (if Validate.isValid model.usernameState then
                         ""
                     else
                         " error"
@@ -223,7 +248,8 @@ view address model =
                 [ type' "text"
                 , placeholder "Enter your username"
                 , value model.username
-                , on (onChangeEvent [ model.usernameState.error, model.state.error ]) targetValue (Signal.message setUsernameMailbox.address << SetUsername)
+                , on (onChangeEvent [ model.usernameState.error, model.state.error ])
+                    (targetValue `Json.Decode.andThen` \s -> Json.Decode.succeed (DebounceUsername <| Bounce s))
                 ]
                 []
             ]
@@ -232,44 +258,18 @@ view address model =
             [ type' "button"
             , class "btn"
             , disabled <| model.message /= Nothing && (isInvalidModel model)
-            , onClick address BeginSubmit
+            , onClick BeginSubmit
             ]
             [ text "Reset password" ]
         , div [] [ text <| Maybe.withDefault "" model.message ]
         ]
 
 
-
--- start app boilerplate
-
-
-setUsernameMailbox : Signal.Mailbox Action
-setUsernameMailbox =
-    Signal.mailbox NoOp
-
-
-app : StartApp.App Model
-app =
-    StartApp.start
+main : Program Never
+main =
+    program
         { init = init
         , update = update
         , view = view
-        , inputs =
-            [ settledAfter (400 * millisecond) setUsernameMailbox.signal
-            ]
+        , subscriptions = \_ -> Sub.none
         }
-
-
-main : Signal Html
-main =
-    app.html
-
-
-port tasks : Signal (Task Never ())
-port tasks =
-    app.tasks
-
-
-port title : String
-port title =
-    "shelakel/elm-validate examples"
